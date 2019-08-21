@@ -42,9 +42,9 @@ static void usage(const char *prog)
 		"  Options:\n"
 		"  -i, --interface=foo	Input interface foo\n"
 		"  -o, --output=bar	Output interface bar\n"
-		"  -q, --queues=n	Number of queues (defaults to 1)\n"
+		"  -q, --queues=n	Number of queues (default 1)\n"
 		"  -S, --xdp-skb=n	Use XDP skb-mod\n"
-		"  -N, --xdp-native=n	Enfore XDP native mode\n"
+		"  -N, --xdp-native=n	Enforce XDP native mode\n"
 		"\n";
 	fprintf(stderr, str, prog);
 	exit(EXIT_FAILURE);
@@ -108,21 +108,6 @@ static void parse_command_line(int argc, char **argv)
 }
 
 
-static unsigned long prev_time;
-
-// static unsigned int header_length = sizeof(struct ether_header) + sizeof(struct iphdr) + sizeof(struct udphdr);
-
-
-
-
-static unsigned long get_nsecs(void)
-{
-	struct timespec ts;
-
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return ts.tv_sec * 1000000000UL + ts.tv_nsec;
-}
-
 
 int main(int argc, char **argv)
 {
@@ -177,14 +162,6 @@ int main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	// map = bpf_object__find_map_by_name(obj, "rr_map");
-	// rr_map = bpf_map__fd(map);
-	// if (rr_map < 0) {
-	// 	fprintf(stderr, "ERROR: no rr map found: %s\n",
-	// 		strerror(rr_map));
-	// 	exit(EXIT_FAILURE);
-	// }
-
 	if (bpf_set_link_xdp_fd(opt_iifindex, prog_fd, opt_xdp_flags) < 0) {
 		fprintf(stderr, "ERROR: link set xdp fd failed\n");
 		exit(EXIT_FAILURE);
@@ -193,14 +170,8 @@ int main(int argc, char **argv)
 
 	/* Create sockets... */
   for (q = 0; q < opt_queues; q++) { // q -> queue
-    // pqt = create_socket(q);
     xsks[q] = xsk_configure(NULL, q, opt_iifindex);
 
-    // if ( pqt < 0 ) {
-    //   fprintf(stderr,
-    //           "ERROR: Socket creation failed\n");
-    //   exit(EXIT_FAILURE);
-    // }
     ret = bpf_map_update_elem(xsks_map, &q, &xsks[q]->sfd, 0);
     if (ret) {
       fprintf(stderr, "Error: bpf_map_update_elem %d\n", q);
@@ -217,16 +188,6 @@ int main(int argc, char **argv)
     fprintf(stderr, "Socket %d created\n", q);
     pthread_create(&pt[q], NULL, XDPRequestHandler, sp);
 
-    // if (t == 0) {
-    //   // Set the number of threads per queue
-    //   ret = bpf_map_update_elem(num_socks_map, &pqt, &opt_threads, 0);
-    //   if (ret) {
-    //     fprintf(stderr, "Error: bpf_map_update_elem %d\n", pqt);
-    //     fprintf(stderr, "ERRNO: %d\n", errno);
-    //     fprintf(stderr, "%s", strerror(errno));
-    //     exit(EXIT_FAILURE);
-    //   }
-    // }
 	}
   fprintf(stderr, "Started %d Threads\n", opt_queues);
 
@@ -244,8 +205,6 @@ int main(int argc, char **argv)
 	// signal(SIGABRT, int_exit);
 
 	setlocale(LC_ALL, "");
-
-	prev_time = get_nsecs();
 
 	sleep(72000); //Sleep for 20 hours
 

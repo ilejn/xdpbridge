@@ -6,11 +6,6 @@
 #include "xdpbridge_user.h"
 
 
-// #include <linux/bpf.h>
-// #include <linux/if_link.h>
-// #include <linux/if_xdp.h>
-// #include <linux/if_ether.h>
-// #include <net/if.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -56,9 +51,6 @@
 #define FQ_NUM_DESCS 1024
 #define CQ_NUM_DESCS 1024
 
-#define DEBUG_HEXDUMP 0
-
-
 
 #define lassert(expr)							\
 	do {								\
@@ -81,40 +73,6 @@
 #endif
 #define likely(x) __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
-
-#if 0
-static void hex_dump(void *pkt, size_t length, u64 addr)
-{
-	const unsigned char *address = (unsigned char *)pkt;
-	const unsigned char *line = address;
-	size_t line_size = 32;
-	unsigned char c;
-	char buf[32];
-	int i = 0;
-
-	sprintf(buf, "addr=%llu", addr);
-	fprintf(stderr, "length = %zu\n", length);
-	fprintf(stderr, "%s | ", buf);
-	while (length-- > 0) {
-		fprintf(stderr, "%02X ", *address++);
-		if (!(++i % line_size) || (length == 0 && i % line_size)) {
-			if (length == 0) {
-				while (i++ % line_size)
-					fprintf(stderr, "__ ");
-			}
-			fprintf(stderr, " | ");	/* right close */
-			while (line < address) {
-				c = *line++;
-				fprintf(stderr, "%c", (c < 33 || c == 255) ? 0x2E : c);
-			}
-			fprintf(stderr,"\n");
-			if (length > 0)
-				fprintf(stderr, "%s | ", buf);
-		}
-	}
-	fprintf(stderr, "\n");
-}
-#endif
 
 static inline u32 umem_nb_free(struct xdp_umem_uqueue *q, u32 nb)
 {
@@ -235,58 +193,6 @@ static inline void *xq_get_data(struct xdpsock *xsk, u64 addr)
 	return &xsk->umem->frames[addr];
 }
 
-// static inline int xq_enq_tx_only(struct xdp_uqueue *uq,
-// 				 unsigned int id, unsigned int ndescs)
-// {
-// 	struct xdp_desc *r = uq->ring;
-// 	unsigned int i;
-
-// 	if (xq_nb_free(uq, ndescs) < ndescs)
-// 		return -ENOSPC;
-
-// 	for (i = 0; i < ndescs; i++) {
-// 		u32 idx = uq->cached_prod++ & uq->mask;
-
-// 		r[idx].addr	= (id + i) << FRAME_SHIFT;
-// 		r[idx].len	= sizeof(pkt_data) - 1;
-// 	}
-
-// 	u_smp_wmb();
-
-// 	*uq->producer = uq->cached_prod;
-// 	return 0;
-// }
-
-static inline int xq_enq(struct xdp_uqueue *uq,
-			 const struct xdp_desc *descs,
-			 unsigned int ndescs)
-{
-	struct xdp_desc *r = uq->ring;
-	unsigned int i;
-
-  fprintf(stderr, "xq_enq\n");
-
-	if (xq_nb_free(uq, ndescs) < ndescs)
-		return -ENOSPC;
-
-	for (i = 0; i < ndescs; i++) {
-		u32 idx = uq->cached_prod++ & uq->mask;
-
-    fprintf(stderr, "addr %lld\n", descs[i].addr);
-
-
-
-
-		r[idx].addr = descs[i].addr;
-		r[idx].len = descs[i].len;
-	}
-
-	u_smp_wmb();
-
-	*uq->producer = uq->cached_prod;
-	return 0;
-}
-
 static inline int xq_enq_copy(struct xdpsock *xsk_in,
        struct xdpsock *xsk_out,
        unsigned int id,
@@ -305,7 +211,6 @@ static inline int xq_enq_copy(struct xdpsock *xsk_in,
   // while(xq_nb_free(uq, ndescs) < ndescs)
   // {}
 
-
 	for (i = 0; i < ndescs; i++) {
 		u32 idx = uq->cached_prod++ & uq->mask;
     char *pkt = NULL;
@@ -313,8 +218,6 @@ static inline int xq_enq_copy(struct xdpsock *xsk_in,
 
 
     pkt = xq_get_data(xsk_in, descs[i].addr);
-
-
 
 		// r[idx].addr = descs[i].addr;
     r[idx].addr = (id + i) << FRAME_SHIFT;
@@ -509,12 +412,6 @@ struct xdpsock *xsk_configure(struct xdp_umem *umem, int queue, int ifindex)
   fprintf(stderr, "Configuring queue %d, in fd %d(%d), out fd %d(%d)\n", queue, opt_iifindex, sfd, opt_oifindex, sfd);
 	lassert(bind(sfd, (struct sockaddr *)&sxdp, sizeof(sxdp)) == 0);
 
-	// sxdp.sxdp_family = PF_XDP;
-	// sxdp.sxdp_ifindex = opt_oifindex;
-	// sxdp.sxdp_queue_id = 0;
-	// lassert(bind(osfd, (struct sockaddr *)&sxdp, sizeof(sxdp)) == 0);
-
-
 	return xsk;
 }
 
@@ -552,21 +449,12 @@ static inline void complete_tx(struct xdpsock *xsk)
 	rcvd = umem_complete_from_kernel(&xsk->umem->cq, descs, ndescs);
 	if (rcvd > 0) {
 
-    // ???
 		// umem_fill_to_kernel(&xsk->umem->fq, descs, rcvd);
-
 
 		xsk->outstanding_tx -= rcvd;
     // fprintf(stderr, "xsk->outstanding_tx %d\n", xsk->outstanding_tx);
 	}
 }
-
-// static int create_socket(int queue)
-// {
-//   size_t offset = queue;
-// 	xsks[offset] = xsk_configure(NULL, queue);
-// 	return offset;
-// }
 
 void * XDPRequestHandler(void *arg)
 {
@@ -576,7 +464,6 @@ void * XDPRequestHandler(void *arg)
 	unsigned int rcvd, i;
 	unsigned int idx = 0;
 
-	// char *pkt = NULL;
 	struct pollfd pfd[1];
 	memset(&pfd, 0, sizeof(pfd));
 
@@ -590,28 +477,6 @@ void * XDPRequestHandler(void *arg)
       continue;
     // fprintf(stderr, "after xq_deq\n");
 
-    // Execute the function for every packet
-    for (i = 0; i < rcvd; i++) {
-      // pkt = xq_get_data(sp->xdps_in, descs[i].addr);
-
-#if DEBUG_HEXDUMP
-      fprintf(stderr, "Port %d: ", sp->ports[l]);
-      hex_dump(pkt, descs[i].len, descs[i].addr);
-      fflush(stdout);
-#endif
-      // // Swap ETH, IP and UDP header
-      // if (!swap_header(pkt, descs[i].len)) {
-      // 	fprintf(stderr, "Port %d: Header to short\n", sp->ports[l]);
-      // 	continue;
-      // }
-
-
-      // Copy from RX to TX
-      // memcpy(&sp->xdps_out->umem->frames[i], pkt, descs[i].len);
-
-
-    }
-
     // Back to the Kernel by TX
     do {
       ret = xq_enq_copy(sp->xdps_in, sp->xdps_out, idx, &sp->xdps_out->tx, descs, rcvd);
@@ -619,16 +484,11 @@ void * XDPRequestHandler(void *arg)
 
         umem_fill_to_kernel_ex(&sp->xdps_in->umem->fq, descs, rcvd);
 
-
-        // ret = xq_enq(&sp->xdps_out->tx, descs, rcvd);
-        // lassert(ret == 0);
         sp->xdps_out->outstanding_tx += rcvd;
-
 
         idx += rcvd;
         idx %= NUM_FRAMES;
       }
-
       // Complete the TX
       complete_tx(sp->xdps_out);
     } while (ret == -ENOSPC);
