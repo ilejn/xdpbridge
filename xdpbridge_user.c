@@ -51,6 +51,13 @@
 #define CQ_NUM_DESCS 1024
 
 
+#if NO_ABORT_ON_LASSERT
+#define LASSERT_ACTION return 0;
+#else
+#define LASSERT_ACTION abort();
+#endif
+
+
 #define lassert(expr)             \
   do {                \
     if (!(expr)) {            \
@@ -58,7 +65,7 @@
         #expr ": errno: %d/\"%s\"\n",   \
         __FILE__, __func__, __LINE__,   \
         errno, strerror(errno));    \
-      abort();                      \
+      LASSERT_ACTION;               \
     }             \
   } while (0)
 
@@ -192,9 +199,9 @@ static inline void *xq_get_data(struct xdpsock *xsk, u64 addr)
   return &xsk->umem->frames[addr];
 }
 
-static inline int xq_enq_copy(struct xdpsock *xsk_in,
+static inline unsigned int xq_enq_copy(struct xdpsock *xsk_in,
                               struct xdpsock *xsk_out,
-                              unsigned int id,
+                              unsigned int *idptr,
                               struct xdp_uqueue *uq,  // tx queue
                               const struct xdp_desc *descs,
                               int *pass_flags,
@@ -202,37 +209,30 @@ static inline int xq_enq_copy(struct xdpsock *xsk_in,
 {
   struct xdp_desc *r = uq->ring;
   unsigned int i;
-  int passed_cnt = 0;
-
-  // fprintf(stderr, "xq_enq\n");
 
   if (xq_nb_free(uq, ndescs) < ndescs)
     return -ENOSPC;
 
-  // while(xq_nb_free(uq, ndescs) < ndescs)
-  // {}
+  unsigned int id = *idptr;
 
-  for (i = 0; i < ndescs; i++) {
-    if (pass_flags[i]) {
+  for (i = 0; i < ndescs; i++, id++, id %= NUM_FRAMES) {
+    if (!pass_flags || pass_flags[i]) {
       u32 idx = uq->cached_prod++ & uq->mask;
       char *pkt = xq_get_data(xsk_in, descs[i].addr);
 
-      // r[idx].addr = descs[i].addr;
-      r[idx].addr = (id + passed_cnt++) << FRAME_SHIFT;
+      r[idx].addr = id << FRAME_SHIFT;
       r[idx].len = descs[i].len;
 
-      memcpy(&xsk_out->umem->frames[r[idx].addr/*idx*/], pkt, descs[i].len);
-      // fprintf(stderr, "addr %lld, %d\n", r[idx].addr, idx);
-
-      // hex_dump(pkt, r[idx].len, r[idx].len);
+      memcpy(&xsk_out->umem->frames[r[idx].addr], pkt, descs[i].len);
     }
 
   }
+  *idptr = id;
 
   u_smp_wmb();
 
   *uq->producer = uq->cached_prod;
-  return passed_cnt;
+  return i;
 }
 
 static inline int xq_deq(struct xdp_uqueue *uq,
@@ -348,6 +348,7 @@ struct xdpsock *xsk_configure(struct xdp_umem *umem, int queue, int ifindex, u32
   if (!umem) {
     shared = false;
     xsk->umem = xdp_umem_configure(sfd);
+    lassert(xsk->umem);
   } else {
     xsk->umem = umem;
   }
@@ -380,7 +381,7 @@ struct xdpsock *xsk_configure(struct xdp_umem *umem, int queue, int ifindex, u32
          off.tx.desc +
          NUM_DESCS * sizeof(struct xdp_desc),
          PROT_READ | PROT_WRITE,
-         MAP_SHARED | MAP_POPULATE, sfd/*osfd*/,
+         MAP_SHARED | MAP_POPULATE, sfd,
          XDP_PGOFF_TX_RING);
   lassert(xsk->tx.map != MAP_FAILED);
 
@@ -460,20 +461,22 @@ int XDPGet(struct sock_port *sp, struct xdp_desc *descs)
   return xq_deq(&sp->xdps_in->rx, descs, BATCH_SIZE);
 }
 
+void XDPMelt(struct sock_port *sp, struct xdp_desc *descs, int rcvd)
+{
+  umem_fill_to_kernel_ex(&sp->xdps_in->umem->fq, descs, rcvd);
+}
+
 int XDPPut(struct sock_port *sp, struct xdp_desc *descs, int *pass_flags, unsigned int rcvd, unsigned int *idx)
 {
   int ret = 0;
   do {
 
-    ret = xq_enq_copy(sp->xdps_in, sp->xdps_out, *idx, &sp->xdps_out->tx, descs, pass_flags, rcvd);
+    ret = xq_enq_copy(sp->xdps_in, sp->xdps_out, idx, &sp->xdps_out->tx, descs, 0, rcvd);
     if (rcvd > 0 && ret >= 0) {
 
-      umem_fill_to_kernel_ex(&sp->xdps_in->umem->fq, descs, rcvd);
+      XDPMelt(sp, descs, rcvd);
 
       sp->xdps_out->outstanding_tx += ret;
-
-      *idx += ret;
-      *idx %= NUM_FRAMES;
     }
     // Complete the TX
     complete_tx(sp->xdps_out);

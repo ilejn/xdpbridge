@@ -14,4 +14,15 @@
 #endif
 
 #define volatile(x...) volatile("")
+
+#ifdef asm_inline
+#undef asm_inline
+#define asm_inline asm
+#endif
+
+#endif
+
+#ifdef asm_inline
+#undef asm_inline
+#define asm_inline asm
 #endif

@@ -53,7 +53,6 @@ struct xdpsock {
 struct sock_port{
   struct xdpsock *xdps_in;
   struct xdpsock *xdps_out;
-  int id;
 };
 
 
@@ -61,3 +60,4 @@ struct xdpsock *xsk_configure(struct xdp_umem *umem, int queue, int ifindex, u32
 
 int XDPGet(struct sock_port *sp, struct xdp_desc *descs);
 int XDPPut(struct sock_port *sp, struct xdp_desc *descs, int *pass_flags, unsigned int rcvd, unsigned int *idx);
+void XDPMelt(struct sock_port *sp, struct xdp_desc *descs, int rcvd);

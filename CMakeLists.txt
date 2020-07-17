@@ -58,31 +58,33 @@ add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/xdpbridge_kern.ll
     -Wno-unused-value -Wno-pointer-sign -Wno-compare-distinct-pointer-types -Wno-gnu-variable-sized-type-not-at-end -Wno-tautological-compare -Wno-unknown-warning-option -Wno-address-of-packed-member
     -S -emit-llvm -c ${CMAKE_CURRENT_SOURCE_DIR}/xdpbridge_kern.c
     -o ${CMAKE_CURRENT_BINARY_DIR}/xdpbridge_kern.ll
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/xdpbridge_kern.c
     )
-
-add_custom_target(xdpbridge_kern_ll ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/xdpbridge_kern.ll)
 
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/xdpbridge_kern.o
     COMMAND ${LLVM_COMPILER}
     -march=bpf -filetype=obj -o ${CMAKE_CURRENT_BINARY_DIR}/xdpbridge_kern.o ${CMAKE_CURRENT_BINARY_DIR}/xdpbridge_kern.ll
-    DEPENDS xdpbridge_kern_ll
+    COMMENT "custom_command for xdpbridge_kern.o"
+    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/xdpbridge_kern.ll
     )
 
-add_custom_target(xdpbridge_kern ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/xdpbridge_kern.o)
-add_dependencies(xdpbridge_kern
-    xdpbridge_kern_ll)
-
+add_custom_target(xdpbridge_kern ALL
+    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/xdpbridge_kern.o
+    COMMENT "custom_target xdpbridge_kern"
+    )
 
 add_library(xdpbridge_user_object SHARED
     xdpbridge_user.c
     bpf_load.c
     )
 
+if(NO_ABORT_ON_LASSERT_MODE)
+    target_compile_definitions(xdpbridge_user_object PRIVATE NO_ABORT_WITH_LASSERT)
+endif(NO_ABORT_ON_LASSERT_MODE)
+
 add_executable(xdpbridge
     xdpbridge_main.c
-)
-
-# add_dependencies(xdpbridge xdpbridge_kern.o)
+    )
 
 target_include_directories(xdpbridge PRIVATE
     ${USERINCLUDE}
